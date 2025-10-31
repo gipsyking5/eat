@@ -2,17 +2,9 @@ FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
-ENV SPCONV_ALGO=native
 
 RUN apt-get update && apt-get install -y \
-    python3.10 \
-    python3-pip \
-    git \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgomp1 \
+    python3.10 python3-pip git libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN ln -s /usr/bin/python3.10 /usr/bin/python
