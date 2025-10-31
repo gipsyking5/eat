@@ -1,4 +1,4 @@
-#FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 
 RUN apt-get update && apt-get install -y \
     python3.10 python3-pip git libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 \
@@ -7,16 +7,11 @@ RUN apt-get update && apt-get install -y \
 RUN ln -s /usr/bin/python3.10 /usr/bin/python
 
 WORKDIR /app
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# PyTorch CUDA 12.8
-RUN pip install --no-cache-dir torch==2.3.0+cu128 torchvision==0.18.0+cu128 \
-    --extra-index-url https://download.pytorch.org/whl/cu128
-
-# TRELLIS + spconv
 RUN pip install --no-cache-dir git+https://github.com/microsoft/TRELLIS.git
-RUN pip install --no-cache-dir spconv-cu128
 
 COPY app.py .
 
