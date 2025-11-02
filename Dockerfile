@@ -5,7 +5,7 @@ FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# Install essential packages
+# Install essential packages, including git
 RUN apt-get update && \
     apt-get install -y \
     python3.10 python3.10-dev python3-pip \
@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir \
     torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu121
 
 # --- CORE PYTHON DEPENDENCIES ---
+# Includes necessary non-trellis specific libraries
 RUN pip install --no-cache-dir \
     pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless scipy ninja rembg onnxruntime \
     trimesh xatlas pyvista pymeshfix igraph transformers \
@@ -66,9 +67,3 @@ EXPOSE 8000
 # --- FINAL COMMAND: Runs the FastAPI server using Uvicorn's direct command ---
 # It serves the 'app' object inside the 'api_app' module on 0.0.0.0:8000
 CMD ["uvicorn", "api_app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
-
-# --- FINAL COMMAND: Run the new FastAPI application ---
-# Make sure your server file is named 'api_app.py' as provided in the previous turn.
-# --- FINAL COMMAND: Runs the FastAPI server using the provided script ---
-CMD ["python3", "api_app.py"]
-
