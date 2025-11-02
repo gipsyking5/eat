@@ -29,13 +29,12 @@ RUN pip install --no-cache-dir \
 # --- CORE PYTHON DEPENDENCIES (Safe/Non-Compiling packages first) ---
 RUN pip install --no-cache-dir \
     setuptools wheel \
-    pillow imageio imageio-ffmpeg tqdm easydict scipy ninja rembg onnxruntime \
+    pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless scipy ninja rembg onnxruntime \
     trimesh xatlas pyvista pymeshfix igraph transformers \
     tensorboard pandas lpips \
     git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
 
 # --- GPU OPTIMIZATIONS (C++/CUDA-heavy packages installed LAST) ---
-# Install the problematic packages here in order:
 RUN pip install --no-cache-dir opencv-python-headless
 RUN pip install --no-cache-dir kaolin -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu121.html
 RUN pip install --no-cache-dir spconv-cu118==2.3.6
@@ -48,9 +47,12 @@ COPY extensions/nvdiffrast /app/extensions/nvdiffrast
 COPY requirements.txt .
 COPY api_app.py .
 
-# --- INSTALL TRELLIS DEPENDENCIES FROM LOCAL SOURCE (Attempting to compile now) ---
-# 1. nvdiffrast 
-RUN pip install /app/extensions/nvdiffrast
+# --- INSTALL TRELLIS DEPENDENCIES FROM LOCAL SOURCE ---
+
+# 1. nvdiffrast (The crucial fix: manually execute setup.py)
+# We move into the directory and run the installation script directly.
+RUN cd /app/extensions/nvdiffrast && \
+    python3 setup.py install
 
 # 2. DIFFOCTREERAST (Source Clone and install)
 RUN git clone --recurse-submodules https://github.com/JeffreyXiang/diffoctreerast.git /tmp/extensions/diffoctreerast && \
