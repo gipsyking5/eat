@@ -5,10 +5,14 @@ FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# --- FIX: Set CUDA environment variables for compilation ---
+# --- CRITICAL FIX 1: Set explicit CUDA paths and dependencies ---
 ENV CUDA_HOME=/usr/local/cuda
 ENV PATH="/usr/local/cuda/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+
+# --- CRITICAL FIX 2: Manually set CUDA architecture list to fix the IndexError ---
+# This tells the compiler which GPUs to target (e.g., V100/A100/A6000 compatibility)
+ENV TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 9.0"
 
 # Install ALL system dependencies for compilation
 RUN apt-get update && \
@@ -47,10 +51,9 @@ COPY extensions/nvdiffrast /app/extensions/nvdiffrast
 COPY requirements.txt .
 COPY api_app.py .
 
-# --- INSTALL TRELLIS DEPENDENCIES FROM LOCAL SOURCE ---
+# --- INSTALL TRELLIS DEPENDENCIES FROM LOCAL SOURCE (The specific fix is the manual python setup.py) ---
 
-# 1. nvdiffrast (The crucial fix: manually execute setup.py)
-# We move into the directory and run the installation script directly.
+# 1. nvdiffrast (Should now compile with fixed CUDA architecture flags)
 RUN cd /app/extensions/nvdiffrast && \
     python3 setup.py install
 
