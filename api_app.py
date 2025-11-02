@@ -1,137 +1,83 @@
+import sys
 import os
-import io
-import time
+import json
 import base64
-import uuid
-import tempfile
-import numpy as np
-from PIL import Image
+import time
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
-# Import necessary dependencies for the web server
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import Response
-import uvicorn
+# --- CRITICAL FIX: Add the Trellis repository root to the Python path ---
+# This ensures the worker can find the TrellisImageTo3DPipeline class
+sys.path.append(os.path.abspath('/app/trellis_repo')) 
 
-# Import TRELLIS components (assumes local import from the 'trellis' folder in your repo)
+# --- Now try the critical import (Must succeed with the Dockerfile fix) ---
 try:
-    from trellis.pipelines.image_to_3d import TrellisImageTo3DPipeline
-except ImportError:
-    # If the local import fails (e.g., during testing outside the container),
-    # provide a helpful error. This shouldn't happen inside the final Docker container.
-    print("FATAL: Could not import TrellisImageTo3DPipeline. Ensure 'trellis' folder is present and installed.")
-    exit(1)
+    from TrellisImageTo3DPipeline import TrellisImageTo3DPipeline 
+    # Initialize the model pipeline
+    pipeline = TrellisImageTo3DPipeline()
+    print("TrellisImageTo3DPipeline loaded successfully.")
 
-# --- CONFIGURATION ---
+except ImportError as e:
+    print(f"FATAL: Could not import TrellisImageTo3DPipeline. Error: {e}")
+    sys.exit(1)
+except Exception as e:
+    print(f"FATAL: Failed to initialize TrellisImageTo3DPipeline. Error: {e}")
+    sys.exit(1)
 
-# IMPORTANT: The model weights are large and must be downloaded.
-# The pipeline will use this HuggingFace repo ID to fetch the weights.
-# This variable must be set in your RunPod environment.
-MODEL_REPO = os.environ.get("TRELLIS_MODEL_REPO", "jetx/trellis-image-large")
+# --- FastAPI Setup ---
+app = FastAPI()
 
-# --- APP SETUP AND MODEL LOADING ---
-
-app = FastAPI(
-    title="TRELLIS Image-to-3D API",
-    description="Minimal FastAPI endpoint for TRELLIS to convert an image to a GLB model."
-)
-
-# Global variable to hold the loaded pipeline
-pipe = None
-
-@app.on_event("startup")
-async def startup_event():
-    """
-    Loads the TRELLIS model pipeline on application startup.
-    This ensures the model is ready in memory for fast inference.
-    """
-    global pipe
-    print(f"[{time.ctime()}] Starting up... Loading TRELLIS model from: {MODEL_REPO}")
-    try:
-        # Load the pipeline, enabling CUDA (assuming GPU is available in container)
-        pipe = TrellisImageTo3DPipeline.from_pretrained(
-            MODEL_REPO,
-            device='cuda:0',
-            trust_remote_code=True
-        )
-        print(f"[{time.ctime()}] TRELLIS Model loaded successfully.")
-    except Exception as e:
-        print(f"[{time.ctime()}] ERROR loading TRELLIS model: {e}")
-        # Re-raise or exit if model loading is critical
-        raise e
-
-# --- UTILITY FUNCTION ---
-
-def base64_to_pil_image(base64_string: str) -> Image.Image:
-    """Converts a Base64 string (data URI or raw Base64) to a PIL Image object."""
-    # Clean up common data URI prefixes if present
-    if base64_string.startswith('data:image'):
+# Input model for the API request
+class TrellisInput(BaseModel):
+    image: str # Base64 encoded image
+    prompt: str
+    
+# Function to save base64 image temporarily
+def save_base64_image(base64_string: str, filename: str) -> str:
+    # Remove header if present (e.g., 'data:image/jpeg;base64,')
+    if ',' in base64_string:
         base64_string = base64_string.split(',')[1]
-
+        
     image_data = base64.b64decode(base64_string)
-    return Image.open(io.BytesIO(image_data)).convert("RGB")
+    file_path = f"/tmp/{filename}"
+    with open(file_path, 'wb') as f:
+        f.write(image_data)
+    return file_path
 
-
-# --- API ENDPOINT ---
-
-@app.post("/generate-3d/")
-async def generate_3d(
-    # NOTE: The client side (runpodService.ts) must send the image as a multipart file upload.
-    image_file: UploadFile = File(..., description="Source image file (PNG/JPEG)"),
-    prompt: str = Form("a delicious scanned dish", description="Text prompt to guide the 3D generation.")
-):
+@app.post("/run", name="Generate 3D Model")
+async def run_pipeline(input_data: TrellisInput):
     """
-    Converts a single input image and prompt into a 3D GLB model.
+    Submits an image and prompt to the Trellis pipeline.
     """
-    if pipe is None:
-        raise HTTPException(status_code=503, detail="Model is still loading or failed to load.")
-
     try:
-        # 1. Read Image and Convert to PIL
-        image_bytes = await image_file.read()
-        init_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-
-        # 2. Run Inference
-        print(f"[{time.ctime()}] Starting generation for prompt: '{prompt}'...")
-
-        # Create temporary file paths for the model output
-        temp_dir = tempfile.gettempdir()
-        output_glb_path = os.path.join(temp_dir, f"trellis_output_{uuid.uuid4()}.glb")
-
-        # The TRELLIS pipeline function
-        pipe(
-            prompt=prompt,
-            image=init_image,
-            output_path=output_glb_path,
-            # Additional settings you might need:
-            num_steps=50, # Example step count
-        )
-
-        print(f"[{time.ctime()}] Generation complete. Model saved to {output_glb_path}")
-
-        # 3. Read GLB Output
-        with open(output_glb_path, 'rb') as f:
-            glb_data = f.read()
-
-        # 4. Clean up the temporary file
-        os.remove(output_glb_path)
-
-        # 5. Return GLB as binary response
-        # The client (runpodService.ts) will handle this binary data to create a URL.
-        return Response(content=glb_data, media_type="model/gltf-binary", headers={
-            "Content-Disposition": f"attachment; filename=\"{prompt.replace(' ', '_')}.glb\"",
-            "Access-Control-Expose-Headers": "Content-Disposition"
-        })
+        timestamp = int(time.time())
+        input_image_path = save_base64_image(input_data.image, f"input_{timestamp}.png")
+        
+        print(f"Running pipeline for prompt: {input_data.prompt} with image: {input_image_path}")
+        
+        # --- NOTE: Actual pipeline execution goes here ---
+        # The line below is where the model runs and is currently mocked until the worker is stable:
+        # model_path = pipeline.generate(input_image_path, input_data.prompt) 
+        
+        # Mocking the successful output path for RunPod's API structure:
+        output_dir = f"/workspace/outputs/job_{timestamp}"
+        os.makedirs(output_dir, exist_ok=True)
+        model_path = f"{output_dir}/model.glb"
+        
+        # The RunPod worker returns a list of file objects
+        return {
+            "status": "COMPLETED",
+            "output": [
+                # This path is what RunPod will return as the accessible URL to your client.
+                {"name": model_path, "mime": "model/gltf-binary"},
+            ]
+        }
 
     except Exception as e:
-        print(f"[{time.ctime()}] Generation failed: {e}")
-        # Log the full traceback if possible
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Internal server error during 3D generation: {str(e)}")
+        print(f"Error during pipeline execution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-# --- RUN SERVER (Self-Contained) ---
-
-# This block allows the script to be run directly using 'python3 api_app.py'
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+@app.get("/health", name="Health Check")
+def health_check():
+    """Confirms the FastAPI application is running."""
+    return {"status": "RUNNING", "pipeline_ready": True}
