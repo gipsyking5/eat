@@ -57,15 +57,18 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
     https://huggingface.co/spaces/cavargas10/TRELLIS-Imagen3D/resolve/main/wheels/nvdiffrast-0.3.3-cp310-cp310-linux_x86_64.whl
 
-# --- API ---
-RUN pip install --no-cache-dir fastapi uvicorn numpy
+# --- API DEPENDENCIES ---
+# Added 'python-multipart' which is required for FastAPI to handle file uploads
+RUN pip install --no-cache-dir fastapi uvicorn[standard] python-multipart
 
 # --- JOUW BESTANDEN ---
-COPY app.py .
+# NOTE: Assuming you rename the new FastAPI file to 'api_app.py' to avoid confusion.
+COPY api_app.py .
 COPY requirements.txt .
 
 RUN mkdir -p /workspace/outputs
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# --- NEW CMD: Run FastAPI using Python entrypoint for better control and logging ---
+CMD ["python3", "api_app.py"]
