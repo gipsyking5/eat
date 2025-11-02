@@ -18,57 +18,59 @@ RUN pip install --no-cache-dir \
     torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu121
 
 # --- BASIC + TRAIN ---
+# Note: Keep core dependencies outside of TRELLIS to ensure they are installed first.
 RUN pip install --no-cache-dir \
     pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless scipy ninja rembg onnxruntime \
     trimesh xatlas pyvista pymeshfix igraph transformers \
     tensorboard pandas lpips \
     git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
 
-# --- XFORMERS ---
+# --- XFORMERS & FLASH-ATTN (GPU Optimizations) ---
 RUN pip install --no-cache-dir xformers==0.0.27.post2 --index-url https://download.pytorch.org/whl/cu121
-
-# --- FLASH-ATTN (PYPI) ---
 RUN pip install --no-cache-dir flash-attn --no-build-isolation
 
 # --- KAOLIN ---
 RUN pip install --no-cache-dir kaolin -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu121.html
 
-# --- NVDIFFRAST (source) ---
-RUN mkdir -p /tmp/extensions && \
-    git clone https://github.com/NVlabs/nvdiffrast.git /tmp/extensions/nvdiffrast && \
-    pip install /tmp/extensions/nvdiffrast
+# --- SPCONV ---
+RUN pip install --no-cache-dir spconv-cu118==2.3.6
+
+# --- COPY PROJECT FILES FIRST (Including 'trellis' folder) ---
+# Copy the necessary local source code directories
+COPY trellis /app/trellis
+COPY extensions/nvdiffrast /app/extensions/nvdiffrast
+COPY wheels /app/wheels
+COPY requirements.txt .
+# Copy the new FastAPI server code
+COPY api_app.py .
+
+# --- INSTALL TRELLIS COMPONENTS FROM LOCAL SOURCE ---
+# This is cleaner than using the remote wheel, as you have the source.
+RUN pip install /app/extensions/nvdiffrast
 
 # --- DIFFOCTREERAST (source) ---
+# NOTE: This step must remain as a clone since the source isn't in your screenshot.
 RUN git clone --recurse-submodules https://github.com/JeffreyXiang/diffoctreerast.git /tmp/extensions/diffoctreerast && \
     pip install /tmp/extensions/diffoctreerast
 
 # --- MIPGAUSSIAN (diff-gaussian) ---
+# NOTE: This step must remain as a clone since the source isn't in your screenshot.
 RUN git clone https://github.com/autonomousvision/mip-splatting.git /tmp/extensions/mip-splatting && \
     pip install /tmp/extensions/mip-splatting/submodules/diff-gaussian-rasterization/
 
-# --- SPCONV ---
-RUN pip install --no-cache-dir spconv-cu118==2.3.6
-
-# --- TRELLIS VAN HF (WHEEL, GEEN GIT) ---
-RUN pip install --no-cache-dir \
-    https://huggingface.co/jetx/trellis-image-large/resolve/main/trellis-0.0.1-py3-none-any.whl
-
-# --- WHEELS ---
-RUN pip install --no-cache-dir \
-    https://huggingface.co/spaces/cavargas10/TRELLIS-Imagen3D/resolve/main/wheels/nvdiffrast-0.3.3-cp310-cp310-linux_x86_64.whl
 
 # --- API DEPENDENCIES ---
-# Added 'python-multipart' which is required for FastAPI to handle file uploads
+# Added FastAPI and file upload support
 RUN pip install --no-cache-dir fastapi uvicorn[standard] python-multipart
 
-# --- JOUW BESTANDEN ---
-# NOTE: Assuming you rename the new FastAPI file to 'api_app.py' to avoid confusion.
-COPY api_app.py .
-COPY requirements.txt .
+# --- CLEANUP (Removed redundant TRELLIS and nvdiffrast wheel installs) ---
+# Removed: TRELLIS VAN HF (WHEEL)
+# Removed: WHEELS (nvdiffrast wheel)
 
 RUN mkdir -p /workspace/outputs
 
 EXPOSE 8000
 
-# --- NEW CMD: Run FastAPI using Python entrypoint for better control and logging ---
+# --- FINAL COMMAND: Run the new FastAPI application ---
+# Make sure your server file is named 'api_app.py' as provided in the previous turn.
 CMD ["python3", "api_app.py"]
