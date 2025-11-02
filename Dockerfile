@@ -13,7 +13,7 @@ ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 # CRITICAL FIX: Manually set CUDA architecture list (Fixes 'list index out of range' error)
 ENV TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 9.0"
 
-# --- SYSTEM DEPENDENCIES ---
+# --- SYSTEM DEPENDENCIES (GIT ADDED HERE TO FIX THE LAST ERROR) ---
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     python3.10 python3.10-dev python3-pip \
@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir \
     torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu121
 
 # --- CRITICAL FIX 2: CLONE, INSTALL, AND RESOLVE DEPENDENCIES ---
-# We assume the Trellis code is inside a repository that needs cloning.
+# Installs git and then clones the repository successfully.
 RUN git clone https://github.com/Trellis-App/trellis-pipeline.git /app/trellis_repo \
     && cd /app/trellis_repo \
     && git submodule update --init --recursive \
