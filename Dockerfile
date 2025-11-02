@@ -5,7 +5,7 @@ FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# --- CRITICAL FIX: Install essential packages, including git and compilation dependencies ---
+# --- CRITICAL FIX: Install ALL system and core PyTorch dependencies in ONE layer to break cache ---
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     python3.10 python3.10-dev python3-pip \
@@ -40,16 +40,13 @@ RUN pip install --no-cache-dir kaolin -f https://nvidia-kaolin.s3.us-east-2.amaz
 RUN pip install --no-cache-dir spconv-cu118==2.3.6
 
 # --- COPY LOCAL PROJECT FILES ---
-# This is where your forked 'trellis' code and local dependencies are copied in.
 COPY trellis /app/trellis
 COPY extensions/nvdiffrast /app/extensions/nvdiffrast
 COPY requirements.txt .
-# Copy the new FastAPI server code
 COPY api_app.py .
 
-# --- INSTALL TRELLIS DEPENDENCIES FROM LOCAL SOURCE ---
-# 1. nvdiffrast (Install from the local source folder copy)
-# This step should now succeed because 'git' and 'build-essential' are guaranteed to be present.
+# --- INSTALL TRELLIS DEPENDENCIES FROM LOCAL SOURCE (Using explicit python setup) ---
+# 1. nvdiffrast 
 RUN pip install /app/extensions/nvdiffrast
 
 # 2. DIFFOCTREERAST (Source Clone)
