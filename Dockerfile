@@ -5,11 +5,12 @@ FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# Install essential packages, including git
+# --- CRITICAL FIX: Install essential packages, including git and compilation dependencies ---
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
     python3.10 python3.10-dev python3-pip \
     build-essential git curl \
+    libffi-dev libssl-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -22,6 +23,7 @@ RUN pip install --no-cache-dir \
 # --- CORE PYTHON DEPENDENCIES ---
 # Includes necessary non-trellis specific libraries
 RUN pip install --no-cache-dir \
+    setuptools wheel \
     pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless scipy ninja rembg onnxruntime \
     trimesh xatlas pyvista pymeshfix igraph transformers \
     tensorboard pandas lpips \
@@ -47,6 +49,7 @@ COPY api_app.py .
 
 # --- INSTALL TRELLIS DEPENDENCIES FROM LOCAL SOURCE ---
 # 1. nvdiffrast (Install from the local source folder copy)
+# This step should now succeed because 'git' and 'build-essential' are guaranteed to be present.
 RUN pip install /app/extensions/nvdiffrast
 
 # 2. DIFFOCTREERAST (Source Clone)
@@ -65,5 +68,4 @@ RUN mkdir -p /workspace/outputs
 EXPOSE 8000
 
 # --- FINAL COMMAND: Runs the FastAPI server using Uvicorn's direct command ---
-# It serves the 'app' object inside the 'api_app' module on 0.0.0.0:8000
 CMD ["uvicorn", "api_app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
