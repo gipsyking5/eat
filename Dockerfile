@@ -1,4 +1,4 @@
-# Base image with CUDA 12.8 devel with Ubuntu 22.04 (Updated from your suggestion)
+# Base image with CUDA 12.8 devel with Ubuntu 22.04
 FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
 
 # --- Critical Environment Variables ---
@@ -10,19 +10,22 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ENV CUDA_HOME=/usr/local/cuda \
     PATH="/usr/local/cuda/bin:${PATH}" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
-    # Using a wide range of arch lists for maximum compatibility
     TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9 9.0"
 
 # Set working directory for the application
 WORKDIR /app
 
-# --- System Dependencies and Build Tools ---
+# --- System Dependencies and Compiler Fix ---
 RUN apt-get update && \
+    # Install specific compiler version 11 and core dependencies
     apt-get install -y --no-install-recommends \
         python3.10 python3.10-dev python3-pip \
         build-essential git curl \
         libffi-dev libssl-dev zlib1g-dev \
-        libgl1-mesa-glx libglib2.0-0 && \
+        libgl1-mesa-glx libglib2.0-0 \
+        gcc-11 g++-11 && \
+    # Make GCC/G++ 11 the default compiler for all subsequent builds
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 --slave /usr/bin/g++ g++ /usr/bin/g++-11 && \
     rm -rf /var/lib/apt/lists/*
 
 # --- PyTorch & Core GPU Libraries (Using cu121 index for compatibility with CUDA 12.8) ---
@@ -53,7 +56,7 @@ COPY api_app.py .
 COPY app.py .
 
 # --- Install Project Extensions and Local Packages ---
-# CRITICAL FIX: Install trellis as a standard package (no -e)
+# Install trellis as a standard package (no -e)
 RUN touch /app/trellis/__init__.py /app/trellis/pipelines/__init__.py && \
     pip install --no-cache-dir /app/trellis
 
@@ -79,5 +82,5 @@ RUN pip install --no-cache-dir fastapi uvicorn[standard] python-multipart runpod
 # Create necessary output directory
 RUN mkdir -p /workspace/outputs
 
-# --- Command to start the FastAPI server on the required port 8080 ---
-CMD ["uvicorn", "api_app:app", "--host", "0.0.0.0", "--port", "8080"]
+# --- Command to start the FastAPI server on the required port 8000 ---
+CMD ["uvicorn", "api_app:app", "--host", "0.0.0.0", "--port", "8000"]
