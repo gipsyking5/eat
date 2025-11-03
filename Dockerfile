@@ -1,11 +1,13 @@
 # --------------------------------------------------------------
-#  RunPod-Ready Dockerfile: Full TRELLIS + CUDA 12.1 + API
-#  Fixes: git warning, TrellisImageTo3DPipeline import, model download
+#  RunPod Serverless: TRELLIS 3D (WORKS WITH YOUR EXISTING trellis/)
+#  - Keeps your local /trellis folder
+#  - Fixes git warning
+#  - Fixes TrellisImageTo3DPipeline import
+#  - Pre-downloads model
 # --------------------------------------------------------------
 
 FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 
-# Environment setup
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     CUDA_HOME=/usr/local/cuda \
@@ -14,9 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 9.0" \
     HF_HOME=/app/models
 
-# -----------------------------------------------------------------
-# 1. System dependencies + git (fixes "git not found" warning)
-# -----------------------------------------------------------------
+# 1. System deps + git (REMOVES WARNING)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         python3.10 python3.10-dev python3-pip \
@@ -27,16 +27,11 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# -----------------------------------------------------------------
-# 2. Core PyTorch (CUDA 12.1)
-# -----------------------------------------------------------------
+# 2. PyTorch
 RUN pip install --no-cache-dir \
-    torch==2.4.0 torchvision==0.19.0 \
-    --index-url https://download.pytorch.org/whl/cu121
+    torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu121
 
-# -----------------------------------------------------------------
-# 3. Core Python dependencies
-# -----------------------------------------------------------------
+# 3. Core deps
 RUN pip install --no-cache-dir \
     setuptools wheel huggingface_hub \
     pillow imageio imageio-ffmpeg tqdm easydict \
@@ -45,69 +40,42 @@ RUN pip install --no-cache-dir \
     tensorboard pandas lpips \
     git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
 
-# -----------------------------------------------------------------
-# 4. GPU-heavy optimizations
-# -----------------------------------------------------------------
-RUN pip install --no-cache-dir \
-    xformers==0.0.27.post2 --index-url https://download.pytorch.org/whl/cu121
+# 4. GPU-heavy
+RUN pip install --no-cache-dir xformers==0.0.27.post2 --index-url https://download.pytorch.org/whl/cu121
 RUN pip install --no-cache-dir flash-attn --no-build-isolation
-RUN pip install --no-cache-dir \
-    kaolin -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu121.html
+RUN pip install --no-cache-dir kaolin -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu121.html
 RUN pip install --no-cache-dir spconv-cu118==2.3.6
 
-# -----------------------------------------------------------------
-# 5. FULL OFFICIAL TRELLIS: Clone + package + model download
-# -----------------------------------------------------------------
-RUN git clone --recurse-submodules https://github.com/microsoft/TRELLIS.git /app/trellis && \
-    # Ensure importable as package
-    touch /app/trellis/__init__.py && \
-    touch /app/trellis/pipelines/__init__.py && \
-    # Install as editable package
-    pip install --no-cache-dir -e /app/trellis && \
-    # Pre-download model (cached in /app/models)
-    python3 - <<'PY'
-from trellis.pipelines import TrellisImageTo3DPipeline
-print("Downloading TRELLIS model...")
-TrellisImageTo3DPipeline.from_pretrained("microsoft/TRELLIS-image-large")
-print("Model downloaded and cached!")
-PY
-
-# -----------------------------------------------------------------
-# 6. Your custom extensions
-# -----------------------------------------------------------------
+# 5. COPY YOUR LOCAL FILES (KEEP trellis/)
+COPY trellis /app/trellis
 COPY extensions/nvdiffrast /app/extensions/nvdiffrast
+COPY requirements.txt .
+COPY api_app.py .
+COPY handler.py .
+
+# 6. FIX: Make trellis importable + install as package
+RUN touch /app/trellis/__init__.py /app/trellis/pipelines/__init__.py && \
+    pip install --no-cache-dir -e /app/trellis && \
+    python3 -c "from trellis.pipelines import TrellisImageTo3DPipeline; \
+                print('Downloading model...'); \
+                TrellisImageTo3DPipeline.from_pretrained('microsoft/TRELLIS-image-large'); \
+                print('Model cached!')"
+
+# 7. Install extensions
 RUN pip install /app/extensions/nvdiffrast
 
-# 6.1 DIFFOCTREERAST
 RUN git clone --recurse-submodules https://github.com/JeffreyXiang/diffoctreerast.git /tmp/diffoctreerast && \
-    pip install /tmp/diffoctreerast && \
-    rm -rf /tmp/diffoctreerast
+    pip install /tmp/diffoctreerast && rm -rf /tmp/diffoctreerast
 
-# 6.2 MIP-SPLATTING
 RUN git clone https://github.com/autonomousvision/mip-splatting.git /tmp/mip-splatting && \
     pip install /tmp/mip-splatting/submodules/diff-gaussian-rasterization/ && \
     rm -rf /tmp/mip-splatting
 
-# -----------------------------------------------------------------
-# 7. Your API code
-# -----------------------------------------------------------------
-COPY requirements.txt .
-COPY api_app.py .
-
-# -----------------------------------------------------------------
-# 8. Install API dependencies
-# -----------------------------------------------------------------
+# 8. API deps
 RUN pip install --no-cache-dir -r requirements.txt || true
-RUN pip install --no-cache-dir fastapi uvicorn[standard] python-multipart
+RUN pip install --no-cache-dir fastapi uvicorn[standard] python-multipart runpod
 
-# -----------------------------------------------------------------
-# 9. Outputs directory
-# -----------------------------------------------------------------
+# 9. Outputs
 RUN mkdir -p /workspace/outputs
 
-EXPOSE 8000
-
-# -----------------------------------------------------------------
-# 10. Start FastAPI
-# -----------------------------------------------------------------
-CMD ["uvicorn", "api_app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["python", "-m", "runpod", "start", "--handler", "handler.handler"]
