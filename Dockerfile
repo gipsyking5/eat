@@ -1,20 +1,21 @@
 # --------------------------------------------------------------
-#  RunPod-Ready Dockerfile: CUDA 12.1 + PyTorch 2.4 + Trellis Pipeline
-#  Fixes: Git layer, trellis imports, heavy compiles
+#  RunPod-Ready Dockerfile: Full TRELLIS (Microsoft Official) + CUDA 12.1
+#  Fixes: Import error by cloning full repo + model download + packaging
 # --------------------------------------------------------------
 
 FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 
-# Environment setup (non-interactive, CUDA paths, Python unbuffered)
+# Environment setup
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     CUDA_HOME=/usr/local/cuda \
     PATH="/usr/local/cuda/bin:${PATH}" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
-    TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 9.0"
+    TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 9.0" \
+    HF_HOME=/app/models  # Hugging Face cache dir
 
 # -----------------------------------------------------------------
-# 1. Install system dependencies (git, build tools, libs)
+# 1. System dependencies
 # -----------------------------------------------------------------
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -24,7 +25,6 @@ RUN apt-get update && \
         libgl1-mesa-glx libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
 # -----------------------------------------------------------------
@@ -35,10 +35,10 @@ RUN pip install --no-cache-dir \
     --index-url https://download.pytorch.org/whl/cu121
 
 # -----------------------------------------------------------------
-# 3. Core Python dependencies (safe, non-compiling first)
+# 3. Core Python dependencies
 # -----------------------------------------------------------------
 RUN pip install --no-cache-dir \
-    setuptools wheel \
+    setuptools wheel huggingface_hub  # Add HF for model download \
     pillow imageio imageio-ffmpeg tqdm easydict \
     opencv-python-headless scipy ninja rembg onnxruntime \
     trimesh xatlas pyvista pymeshfix igraph transformers \
@@ -46,7 +46,7 @@ RUN pip install --no-cache-dir \
     git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
 
 # -----------------------------------------------------------------
-# 4. GPU-heavy optimizations (compile after basics)
+# 4. GPU-heavy optimizations
 # -----------------------------------------------------------------
 RUN pip install --no-cache-dir \
     xformers==0.0.27.post2 --index-url https://download.pytorch.org/whl/cu121
@@ -56,28 +56,31 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir spconv-cu118==2.3.6
 
 # -----------------------------------------------------------------
-# 5. Copy local project files (your trellis source)
+# 5. CRITICAL FIX: Clone FULL official TRELLIS repo + install as package
 # -----------------------------------------------------------------
-COPY trellis /app/trellis
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    git clone --recurse-submodules https://github.com/microsoft/TRELLIS.git /app/trellis && \
+    # Add missing __init__.py for packaging (if not in repo) \
+    touch /app/trellis/__init__.py && \
+    touch /app/trellis/pipelines/__init__.py && \
+    # Install as editable package \
+    pip install --no-cache-dir -e /app/trellis && \
+    apt-get purge -y --auto-remove git && \
+    rm -rf /var/lib/apt/lists/*
+
+# -----------------------------------------------------------------
+# 6. Pre-download TRELLIS model (avoids runtime HF download)
+# -----------------------------------------------------------------
+RUN python3 -c "from trellis.pipelines import TrellisImageTo3DPipeline; TrellisImageTo3DPipeline.from_pretrained('microsoft/TRELLIS-image-large'); print('Model downloaded successfully!')"
+
+# -----------------------------------------------------------------
+# 7. Install local extensions (your custom ones)
+# -----------------------------------------------------------------
 COPY extensions/nvdiffrast /app/extensions/nvdiffrast
-COPY requirements.txt .
-COPY api_app.py .
-
-# -----------------------------------------------------------------
-# 6. CRITICAL FIX: Install local 'trellis' as editable package
-#    (Makes 'from trellis.pipelines import TrellisImageTo3DPipeline' work at runtime)
-# -----------------------------------------------------------------
-RUN pip install --no-cache-dir -e /app/trellis
-
-# -----------------------------------------------------------------
-# 7. Install local extensions
-# -----------------------------------------------------------------
 RUN pip install /app/extensions/nvdiffrast
 
-# -----------------------------------------------------------------
-# 8. Clone & install external extensions (git in SAME layer each time)
-# -----------------------------------------------------------------
-# 8.1 DIFFOCTREERAST
+# 7.1 DIFFOCTREERAST
 RUN apt-get update && \
     apt-get install -y --no-install-recommends git && \
     git clone --recurse-submodules https://github.com/JeffreyXiang/diffoctreerast.git /tmp/extensions/diffoctreerast && \
@@ -85,7 +88,7 @@ RUN apt-get update && \
     apt-get purge -y --auto-remove git && \
     rm -rf /var/lib/apt/lists/* /tmp/extensions/diffoctreerast
 
-# 8.2 MIP-SPLATTING (diff-gaussian-rasterization)
+# 7.2 MIP-SPLATTING
 RUN apt-get update && \
     apt-get install -y --no-install-recommends git && \
     git clone https://github.com/autonomousvision/mip-splatting.git /tmp/extensions/mip-splatting && \
@@ -94,18 +97,20 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* /tmp/extensions/mip-splatting
 
 # -----------------------------------------------------------------
-# 9. Install from requirements.txt + API deps (safe fallback)
+# 8. Your API files (keep these)
+# -----------------------------------------------------------------
+COPY requirements.txt .
+COPY api_app.py .
+
+# -----------------------------------------------------------------
+# 9. Install API deps
 # -----------------------------------------------------------------
 RUN pip install --no-cache-dir -r requirements.txt || true
 RUN pip install --no-cache-dir fastapi uvicorn[standard] python-multipart
 
-# Create outputs dir
+# Outputs dir
 RUN mkdir -p /workspace/outputs
 
-# Expose port
 EXPOSE 8000
 
-# -----------------------------------------------------------------
-# 10. Start the FastAPI app
-# -----------------------------------------------------------------
 CMD ["uvicorn", "api_app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
