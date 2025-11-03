@@ -1,5 +1,5 @@
-# Base image with CUDA 12.1 and CuDNN 8
-FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+# Base image with CUDA 12.8 devel with Ubuntu 22.04 (Updated from your suggestion)
+FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
 
 # --- Critical Environment Variables ---
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -10,7 +10,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ENV CUDA_HOME=/usr/local/cuda \
     PATH="/usr/local/cuda/bin:${PATH}" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
-    TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 9.0"
+    # Using a wide range of arch lists for maximum compatibility
+    TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6 8.9 9.0"
+
+# Set working directory for the application
+WORKDIR /app
 
 # --- System Dependencies and Build Tools ---
 RUN apt-get update && \
@@ -21,10 +25,7 @@ RUN apt-get update && \
         libgl1-mesa-glx libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
-# Set working directory for the application
-WORKDIR /app
-
-# --- PyTorch & Core GPU Libraries (CUDA 12.1) ---
+# --- PyTorch & Core GPU Libraries (Using cu121 index for compatibility with CUDA 12.8) ---
 RUN pip install --no-cache-dir \
     torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu121
 
@@ -44,8 +45,7 @@ RUN pip install --no-cache-dir opencv-python-headless
 RUN pip install --no-cache-dir kaolin -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu121.html
 RUN pip install --no-cache-dir spconv-cu118==2.3.6
 
-# --- Copy Local Project Files ---
-# Ensure all files required for the build and server are present
+# --- Copy Local Project Files (Source of Truth) ---
 COPY trellis /app/trellis
 COPY extensions/nvdiffrast /app/extensions/nvdiffrast
 COPY requirements.txt .
@@ -53,7 +53,7 @@ COPY api_app.py .
 COPY app.py .
 
 # --- Install Project Extensions and Local Packages ---
-# CRITICAL FIX: Install trellis as a standard package (removed -e editable flag for reliability)
+# CRITICAL FIX: Install trellis as a standard package (no -e)
 RUN touch /app/trellis/__init__.py /app/trellis/pipelines/__init__.py && \
     pip install --no-cache-dir /app/trellis
 
@@ -73,11 +73,11 @@ RUN git clone https://github.com/autonomousvision/mip-splatting.git /tmp/extensi
 # Install remaining dependencies from requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt || true
 
-# Install server dependencies (uvicorn needed for CMD)
+# Install server dependencies
 RUN pip install --no-cache-dir fastapi uvicorn[standard] python-multipart runpod
 
 # Create necessary output directory
 RUN mkdir -p /workspace/outputs
 
-# --- Command to start the FastAPI server ---
+# --- Command to start the FastAPI server on the required port 8080 ---
 CMD ["uvicorn", "api_app:app", "--host", "0.0.0.0", "--port", "8080"]
