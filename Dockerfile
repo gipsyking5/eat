@@ -45,13 +45,13 @@ RUN pip install --no-cache-dir kaolin -f https://nvidia-kaolin.s3.us-east-2.amaz
 RUN pip install --no-cache-dir spconv-cu118==2.3.6
 
 # --- Copy Local Project Files ---
+# THESE LINES ARE CORRECT based on your GitHub images:
 COPY trellis /app/trellis
 COPY extensions/nvdiffrast /app/extensions/nvdiffrast
 COPY requirements.txt .
 COPY api_app.py .
+COPY app.py .
 # The problematic line COPY handler.py . has been removed!
-# We assume 'app.py' (from your screenshot) is not strictly needed for the API server
-# if all logic is in api_app.py, but you can add COPY app.py . if necessary.
 
 # --- Install Project Extensions and Local Packages ---
 # Install trellis as an editable package
@@ -81,5 +81,4 @@ RUN pip install --no-cache-dir fastapi uvicorn[standard] python-multipart runpod
 RUN mkdir -p /workspace/outputs
 
 # --- Command to start the FastAPI server ---
-# CMD runs uvicorn, which loads the FastAPI app object named 'app' from the 'api_app' module.
 CMD ["uvicorn", "api_app:app", "--host", "0.0.0.0", "--port", "8080"]
